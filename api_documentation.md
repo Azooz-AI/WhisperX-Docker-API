@@ -135,19 +135,19 @@ The API supports automatic language detection or manual language specification u
 
 ### Basic Transcription
 ```bash
-curl -X POST http://localhost:5772/v1/media/transcribe \
+curl -X POST http://host.docker.internal:5772/v1/media/transcribe \
   -H "Content-Type: application/json" \
   -d '{
-    "media_url": "https://example.com/audio.wav"
+    "media_url": "http://host.docker.internal:9000/meeting-recordings/audio.wav"
   }'
 ```
 
 ### Speaker Diarization with Word Timestamps
 ```bash
-curl -X POST http://localhost:5772/v1/media/transcribe \
+curl -X POST http://host.docker.internal:5772/v1/media/transcribe \
   -H "Content-Type: application/json" \
   -d '{
-    "media_url": "https://example.com/meeting.wav",
+    "media_url": "http://host.docker.internal:9000/meeting-recordings/meeting.wav",
     "include_speaker_labels": true,
     "include_word_timestamps": true,
     "max_speakers": 5,
@@ -158,10 +158,10 @@ curl -X POST http://localhost:5772/v1/media/transcribe \
 
 ### SRT Subtitle Generation
 ```bash
-curl -X POST http://localhost:5772/v1/media/transcribe \
+curl -X POST http://host.docker.internal:5772/v1/media/transcribe \
   -H "Content-Type: application/json" \
   -d '{
-    "media_url": "https://example.com/video.mp4",
+    "media_url": "http://host.docker.internal:9000/meeting-recordings/video.mp4",
     "output_format": "srt",
     "max_words_per_line": 8,
     "language": "en"
@@ -170,10 +170,10 @@ curl -X POST http://localhost:5772/v1/media/transcribe \
 
 ### Translation to English
 ```bash
-curl -X POST http://localhost:5772/v1/media/transcribe \
+curl -X POST http://host.docker.internal:5772/v1/media/transcribe \
   -H "Content-Type: application/json" \
   -d '{
-    "media_url": "https://example.com/spanish_audio.wav",
+    "media_url": "http://host.docker.internal:9000/meeting-recordings/spanish_audio.wav",
     "task": "translate",
     "language": "es"
   }'
