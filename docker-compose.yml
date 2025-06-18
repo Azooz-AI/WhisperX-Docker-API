@@ -1,0 +1,25 @@
+
+services:
+  whisperx-api:
+    build: .
+    container_name: whisperx-api
+    ports:
+      - "5772:5772"
+    environment:
+      - PORT=5772
+      - TIMEOUT_SECONDS=1200
+      - DEFAULT_MODEL=large-v3
+      - DEBUG=false
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    volumes:
+      - whisper_cache:/root/.cache  # Cache models to avoid re-downloading
+
+volumes:
+  whisper_cache:

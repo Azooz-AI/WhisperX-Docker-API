@@ -1,0 +1,15 @@
+# Flask and web server dependencies
+Flask==2.3.3
+Flask-CORS==4.0.0
+gunicorn==21.2.0
+requests==2.31.0
+
+# Audio processing dependencies
+librosa==0.10.1
+soundfile==0.12.1
+
+# WhisperX dependencies (will be installed separately)
+# whisperx will be installed via pip install whisperx in Dockerfile
+
+# Additional utilities
+python-dotenv==1.0.0
