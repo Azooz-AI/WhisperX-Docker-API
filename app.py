@@ -55,15 +55,36 @@ def load_alignment_model(language_code):
         return None, None
 
 def load_diarization_model():
-    """Load speaker diarization model"""
+    """Load speaker diarization model using pyannote directly"""
     global diarize_model
     if diarize_model is None:
         print("Loading diarization model...")
-        diarize_model = whisperx.DiarizationPipeline(
-            use_auth_token=None,  # You can add HuggingFace token here if needed
-            device=Config.DEFAULT_DEVICE
-        )
-        print("Diarization model loaded successfully")
+        try:
+            # Check for Hugging Face token in environment
+            hf_token = os.environ.get('HUGGINGFACE_TOKEN') or os.environ.get('HF_TOKEN')
+            if not hf_token:
+                raise Exception("Speaker diarization requires a Hugging Face token. Please set HUGGINGFACE_TOKEN environment variable. Get your token at: https://huggingface.co/settings/tokens")
+            
+            # Try to use whisperx.DiarizationPipeline first
+            try:
+                diarize_model = whisperx.DiarizationPipeline(
+                    use_auth_token=hf_token,
+                    device=Config.DEFAULT_DEVICE
+                )
+                print("Diarization model loaded successfully via WhisperX")
+            except AttributeError:
+                print("WhisperX DiarizationPipeline not found, using pyannote directly...")
+                # Use pyannote directly as fallback
+                from pyannote.audio import Pipeline
+                diarize_model = Pipeline.from_pretrained(
+                    "pyannote/speaker-diarization-3.1",
+                    use_auth_token=hf_token
+                ).to(torch.device(Config.DEFAULT_DEVICE))
+                print("Diarization model loaded successfully via pyannote")
+                
+        except Exception as e:
+            print(f"Failed to load diarization model: {e}")
+            return None
     return diarize_model
 
 def download_file_from_url(url):
@@ -198,19 +219,19 @@ def transcribe_media():
                 "message": "media_url is required"
             }), 400
         
-        # Extract parameters with defaults
+        # Extract parameters with defaults and type conversion
         params = {
             "media_url": data.get("media_url"),
             "task": data.get("task", "transcribe"),
             "language": data.get("language"),  # None = auto-detect
             "output_format": data.get("output_format", "json"),
-            "include_word_timestamps": data.get("include_word_timestamps", False),
-            "include_speaker_labels": data.get("include_speaker_labels", False),
-            "include_segments": data.get("include_segments", True),
-            "max_speakers": data.get("max_speakers"),
-            "beam_size": data.get("beam_size", 5),
-            "temperature": data.get("temperature", 0.0),
-            "max_words_per_line": data.get("max_words_per_line"),
+            "include_word_timestamps": str(data.get("include_word_timestamps", False)).lower() == "true",
+            "include_speaker_labels": str(data.get("include_speaker_labels", False)).lower() == "true",
+            "include_segments": str(data.get("include_segments", True)).lower() == "true",
+            "max_speakers": int(data.get("max_speakers", 0)) if data.get("max_speakers") else None,
+            "beam_size": int(data.get("beam_size", 5)),
+            "temperature": float(data.get("temperature", 0.0)),
+            "max_words_per_line": int(data.get("max_words_per_line", 0)) if data.get("max_words_per_line") else None,
             "id": data.get("id")
         }
         
@@ -269,10 +290,103 @@ def transcribe_media():
         if params["include_speaker_labels"]:
             print("Performing speaker diarization...")
             diarize_model_obj = load_diarization_model()
-            diarize_segments = diarize_model_obj(temp_file_path)
-            speakers_result = whisperx.assign_word_speakers(diarize_segments, result_aligned if 'result_aligned' in locals() else result)
-            if 'segments' in speakers_result:
-                segments = speakers_result["segments"]
+            if diarize_model_obj is None:
+                return jsonify({
+                    "endpoint": f"/{Config.API_VERSION}/media/transcribe",
+                    "code": 400,
+                    "id": params.get("id"),
+                    "response": None,
+                    "message": "Speaker diarization unavailable. Please set HUGGINGFACE_TOKEN environment variable and restart container. Get token at: https://huggingface.co/settings/tokens",
+                    "processing_time": round(time.time() - start_time, 2)
+                }), 400
+            
+            try:
+                print(f"Diarization model type: {type(diarize_model_obj)}")
+                print(f"Processing audio file: {temp_file_path}")
+                
+                # Check if using WhisperX DiarizationPipeline or pyannote directly
+                if hasattr(diarize_model_obj, '__class__') and 'Pipeline' in str(type(diarize_model_obj)):
+                    print("Using pyannote Pipeline directly")
+                    # Use the audio file path directly as pyannote can handle it better
+                    diarize_segments = diarize_model_obj(temp_file_path)
+                    print(f"Diarization completed, segments type: {type(diarize_segments)}")
+                else:
+                    print("Using WhisperX DiarizationPipeline")
+                    diarize_segments = diarize_model_obj(temp_file_path)
+                
+                print("Assigning speakers to words...")
+                
+                # Convert pyannote format to WhisperX format if needed
+                if hasattr(diarize_segments, 'itertracks'):
+                    # Convert pyannote Annotation to WhisperX format
+                    print("Converting pyannote format to WhisperX format...")
+                    whisperx_segments = []
+                    for turn, _, speaker in diarize_segments.itertracks(yield_label=True):
+                        whisperx_segments.append({
+                            'start': turn.start,
+                            'end': turn.end,
+                            'speaker': speaker
+                        })
+                    
+                    # Create a simple object that whisperx.assign_word_speakers can use
+                    class DiarizeResult:
+                        def __init__(self, segments):
+                            self.segments = segments
+                    
+                    diarize_result = DiarizeResult(whisperx_segments)
+                    print(f"Converted {len(whisperx_segments)} speaker segments")
+                    
+                    # Manual speaker assignment instead of using whisperx.assign_word_speakers
+                    print("Performing manual speaker assignment...")
+                    transcription_segments = result_aligned['segments'] if 'result_aligned' in locals() else result['segments']
+                    
+                    for segment in transcription_segments:
+                        segment_start = segment['start']
+                        segment_end = segment['end']
+                        
+                        # Find the speaker with the most overlap
+                        best_speaker = None
+                        max_overlap = 0
+                        
+                        for speaker_seg in whisperx_segments:
+                            overlap_start = max(segment_start, speaker_seg['start'])
+                            overlap_end = min(segment_end, speaker_seg['end'])
+                            overlap = max(0, overlap_end - overlap_start)
+                            
+                            if overlap > max_overlap:
+                                max_overlap = overlap
+                                best_speaker = speaker_seg['speaker']
+                        
+                        if best_speaker:
+                            segment['speaker'] = best_speaker
+                        else:
+                            segment['speaker'] = 'SPEAKER_00'  # Default
+                    
+                    segments = transcription_segments
+                    print(f"Manual speaker assignment completed. Found speakers: {set(seg.get('speaker', 'UNKNOWN') for seg in segments)}")
+                    
+                else:
+                    # Use WhisperX format directly
+                    print("Using WhisperX format directly...")
+                    speakers_result = whisperx.assign_word_speakers(diarize_segments, result_aligned if 'result_aligned' in locals() else result)
+                    if 'segments' in speakers_result:
+                        segments = speakers_result["segments"]
+                        print(f"WhisperX speaker assignment completed. Found {len(segments)} segments")
+                    
+            except Exception as diarization_error:
+                error_message = str(diarization_error)
+                print(f"Full diarization error: {error_message}")
+                print(f"Error type: {type(diarization_error)}")
+                import traceback
+                print(f"Full traceback: {traceback.format_exc()}")
+                return jsonify({
+                    "endpoint": f"/{Config.API_VERSION}/media/transcribe",
+                    "code": 400,
+                    "id": params.get("id"),
+                    "response": None,
+                    "message": f"Speaker diarization failed: {error_message}. You may need to accept terms at: https://huggingface.co/pyannote/speaker-diarization-3.1",
+                    "processing_time": round(time.time() - start_time, 2)
+                }), 400
         
         # Format output
         response_data = format_transcription_output(result, segments, word_segments, speakers_result, params)

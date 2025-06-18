@@ -8,6 +8,9 @@ requests==2.31.0
 librosa==0.10.1
 soundfile==0.12.1
 
+# Speaker diarization dependencies
+pyannote.audio
+
 # WhisperX dependencies (will be installed separately)
 # whisperx will be installed via pip install whisperx in Dockerfile
 

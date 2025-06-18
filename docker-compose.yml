@@ -10,7 +10,7 @@ services:
       - TIMEOUT_SECONDS=1200
       - DEFAULT_MODEL=large-v3
       - DEBUG=false
-      - HUGGINGFACE_TOKEN=xxxx
+      - HUGGINGFACE_TOKEN=hf_xxxxxxxxxxxxxxxx
     deploy:
       resources:
         reservations:
