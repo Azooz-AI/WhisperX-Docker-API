@@ -1,4 +1,4 @@
-
+  
 services:
   whisperx-api:
     build: .
@@ -10,6 +10,7 @@ services:
       - TIMEOUT_SECONDS=1200
       - DEFAULT_MODEL=large-v3
       - DEBUG=false
+      - HUGGINGFACE_TOKEN=xxxx
     deploy:
       resources:
         reservations:
